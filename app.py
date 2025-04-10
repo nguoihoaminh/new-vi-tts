@@ -26,7 +26,7 @@ output_dir = f"{default_dir}/audio"
 
 # --- Texts ---
 # Text matching the reference audio (helps the model learn the voice). Please make sure it match with the referrence audio!
-ref_text = "Và nếu họ có quan điểm chính trị trái ngược , bạn có thể mỉm cười với họ trong nhà thờ nhưng ngoài đời thì khó lòng mà làm được . Những suy nghĩ này có quen thuộc với bạn không ?"
+ref_text = "Và nếu họ có quan điểm chính trị trái ngược , bạn vẫn có thể mỉm cười với họ trong nhà thờ nhưng ngoài đời thì khó lòng mà làm được . Những suy nghĩ này có quen thuộc với bạn không ?"
 
 # --- Let's Go! ---
 print("Initializing the TTS engine... (Might take a sec)")
