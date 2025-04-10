@@ -13,16 +13,16 @@ default_dir = "/kaggle/working/new-vi-tts"
 # --- Config ---
 # Path to the model checkpoint you downloaded from *this* repo
 # MAKE SURE this path points to the actual .pth or .ckpt file!
-eraX_ckpt_path = "{default_dir}/infer/model/model_612000.safetensors" # <-- CHANGE THIS!
+eraX_ckpt_path = f"{default_dir}/infer/model/model_612000.safetensors" # <-- CHANGE THIS!
 
 # Path to the voice you want to clone
-ref_audio_path = "{default_dir}/infer/audio.wav" # <-- CHANGE THIS!
+ref_audio_path = f"{default_dir}/infer/audio.wav" # <-- CHANGE THIS!
 
 # Path to the vocab file from this repo
-vocab_file = "{default_dir}/infer/model/vocab.txt" # <-- CHANGE THIS!
+vocab_file = f"{default_dir}/infer/model/vocab.txt" # <-- CHANGE THIS!
 
 # Where to save the generated sound
-output_dir = "{default_dir}/audio"
+output_dir = f"{default_dir}/audio"
 
 # --- Texts ---
 # Text matching the reference audio (helps the model learn the voice). Please make sure it match with the referrence audio!
@@ -81,7 +81,7 @@ def speak(text,filename):
 
     print("\nAll done! Check your output folder.")
 
-dir = '{default_dir}/books'
+dir = f'{default_dir}/books'
 
 for filename in os.listdir(dir):
     fs = open(dir + '/'+filename, "r")
