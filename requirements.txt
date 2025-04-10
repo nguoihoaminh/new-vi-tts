@@ -65,6 +65,7 @@ deepspeed
 pydub
 gradio
 numpy
+spaces
 
 # Vietnamese 101
 vinorm
