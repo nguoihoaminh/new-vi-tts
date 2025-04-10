@@ -5,7 +5,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] =  "0" # Tell it which GPU to use (or ignore if you're CPU-bound and patient!)
 
 from vinorm import TTSnorm # Gotta normalize that Vietnamese text first
-from f5tts_wrapper import F5TTSWrapper # Our handy wrapper class
+from infer.f5tts_wrapper import F5TTSWrapper # Our handy wrapper class
 
 
 default_dir = "/kaggle/working/new-vi-tts"
