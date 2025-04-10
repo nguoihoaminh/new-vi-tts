@@ -177,15 +177,6 @@ class F5TTSWrapper:
     def _load_checkpoint(self, model, ckpt_path, dtype=None, use_ema=True):
         """
         Load model checkpoint with proper handling of different checkpoint formats.
-        
-        Args:
-            model: The model to load weights into
-            ckpt_path: Path to the checkpoint file
-            dtype: Data type for model weights
-            use_ema: Whether to use EMA weights from the checkpoint
-        
-        Returns:
-            Loaded model
         """
         if dtype is None:
             dtype = (
@@ -198,20 +189,30 @@ class F5TTSWrapper:
         model = model.to(dtype)
 
         ckpt_type = ckpt_path.split(".")[-1]
-        if ckpt_type == "safetensors":
-            from safetensors.torch import load_file
-            checkpoint = load_file(ckpt_path, device=self.device)
-        else:
-            checkpoint = torch.load(ckpt_path, map_location=self.device, weights_only=True)
-
-        if use_ema:
+        
+        try:
             if ckpt_type == "safetensors":
-                checkpoint = {"ema_model_state_dict": checkpoint}
-            checkpoint["model_state_dict"] = {
-                k.replace("ema_model.", ""): v
-                for k, v in checkpoint["ema_model_state_dict"].items()
-                if k not in ["initted", "step"]
-            }
+                from safetensors.torch import load_file
+                checkpoint = load_file(ckpt_path, device=self.device)
+                checkpoint = {"model_state_dict": checkpoint}
+            else:
+                checkpoint = torch.load(ckpt_path, map_location=self.device, weights_only=True)
+                
+                # Handle different checkpoint formats
+                if "model_state_dict" not in checkpoint:
+                    # If loaded checkpoint is already a state dict
+                    if isinstance(checkpoint, dict) and any(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+                        checkpoint = {"model_state_dict": checkpoint}
+                    # For seamlessM4T format
+                    elif "model" in checkpoint:
+                        checkpoint = {"model_state_dict": checkpoint["model"]}
+
+            if use_ema and "ema_model_state_dict" in checkpoint:
+                checkpoint["model_state_dict"] = {
+                    k.replace("ema_model.", ""): v
+                    for k, v in checkpoint["ema_model_state_dict"].items()
+                    if k not in ["initted", "step"]
+                }
 
             # patch for backward compatibility
             for key in ["mel_spec.mel_stft.mel_scale.fb", "mel_spec.mel_stft.spectrogram.window"]:
@@ -219,10 +220,11 @@ class F5TTSWrapper:
                     del checkpoint["model_state_dict"][key]
 
             model.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            if ckpt_type == "safetensors":
-                checkpoint = {"model_state_dict": checkpoint}
-            model.load_state_dict(checkpoint["model_state_dict"])
+            
+        except Exception as e:
+            print(f"Error loading checkpoint: {e}")
+            print("Checkpoint keys:", checkpoint.keys() if isinstance(checkpoint, dict) else "Not a dict")
+            raise
 
         del checkpoint
         torch.cuda.empty_cache()
