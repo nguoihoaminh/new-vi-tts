@@ -1,6 +1,16 @@
-numpy==1.24
-matplotlib
+# Preinstall requirements from TTS 
+TTS @ git+https://github.com/thinhlpg/TTS.git@ff217b3f27b294de194cc59c5119d1e08b06413c
+typing-extensions
+cutlet
+mecab-python3
+unidic-lite
+unidic
+langid
+deepspeed
+pydub
+gradio
+numpy
+
+# Vietnamese 101
 vinorm
-f5-tts
-librosa
-# jupyter
+underthesea

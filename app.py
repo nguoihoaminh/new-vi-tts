@@ -1,132 +1,320 @@
-# Ubuntu: sudo apt install ffmpeg
-# Windows please refer to https://www.geeksforgeeks.org/how-to-install-ffmpeg-on-windows/
-
+import csv
+import datetime
 import os
-import requests
-from tqdm import tqdm
-os.environ["CUDA_VISIBLE_DEVICES"] =  "0" # Tell it which GPU to use (or ignore if you're CPU-bound and patient!)
+import re
+import time
+import uuid
+from io import StringIO
 
-from vinorm import TTSnorm # Gotta normalize that Vietnamese text first
-from infer.f5tts_wrapper import F5TTSWrapper # Our handy wrapper class
+import gradio as gr
+import spaces
+import torch
+import torchaudio
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+from TTS.tts.configs.xtts_config import XttsConfig
+from TTS.tts.models.xtts import Xtts
+from vinorm import TTSnorm
 
+# download for mecab
+os.system("python -m unidic download")
 
-default_dir = "/kaggle/working/new-vi-tts"
+HF_TOKEN = os.environ.get("HF_TOKEN")
+api = HfApi(token=HF_TOKEN)
 
-# --- Config ---
-MODEL_URL = "https://cdn-lfs-us-1.hf.co/repos/ab/76/ab761a9d373aa0b6e54886fd8cf42675589ec29e5f3a1bf14d38b59eb8ad99a7/f2122cedcffc532d6048847092414e638cfb4db402881cb8146a606008e9ff56?response-content-disposition=attachment%3B+filename*%3DUTF-8%27%27seamlessM4T_v2_large.pt%3B+filename%3D%22seamlessM4T_v2_large.pt%22%3B&Expires=1744276208&Policy=eyJTdGF0ZW1lbnQiOlt7IkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc0NDI3NjIwOH19LCJSZXNvdXJjZSI6Imh0dHBzOi8vY2RuLWxmcy11cy0xLmhmLmNvL3JlcG9zL2FiLzc2L2FiNzYxYTlkMzczYWEwYjZlNTQ4ODZmZDhjZjQyNjc1NTg5ZWMyOWU1ZjNhMWJmMTRkMzhiNTllYjhhZDk5YTcvZjIxMjJjZWRjZmZjNTMyZDYwNDg4NDcwOTI0MTRlNjM4Y2ZiNGRiNDAyODgxY2I4MTQ2YTYwNjAwOGU5ZmY1Nj9yZXNwb25zZS1jb250ZW50LWRpc3Bvc2l0aW9uPSoifV19&Signature=iLzsf6AWbQRTPZHxWq7SF0Iq6ZVhoGHf3lem5up6iH0Cun8-M1N%7EqTpH4lFJAPa%7ELDA-%7EhNTbRdJK1e0YpwxH1NsQPI-qyjint9ESu-rhQow-CQ82wrBhQjea9nRAthHyiOd9PTZEOAe9nCy1V-%7EGhhfxZpWzfDCaLfMyFAhSnR-ZbPPZTSh4MtdowzbQRcE9C-5IfhhbiuKT2Q5za9AT0J8DT6EJYevab%7Emp%7EkY2cDHZO3rL5nxJqCUufeHGCcMOQQsRCw7czFAY9qE0lvQDGH8kDONLxE35snIboT4tJMqNXm2qCyARwUTOqlDAQc05qE2CI9UFhNZenZ1P83pjw__&Key-Pair-Id=K24J24Z295AEI9"
+# This will trigger downloading model
+print("Downloading if not downloaded viXTTS")
+checkpoint_dir = "model/"
+repo_id = "capleaf/viXTTS"
+use_deepspeed = False
 
-def download_model(url: str, save_path: str):
-    """Download model file with progress bar"""
-    if os.path.exists(save_path):
-        print(f"Model already exists at {save_path}")
-        return
-    
-    print(f"Downloading model to {save_path}...")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()  # Raise error for bad status codes
-        total_size = int(response.headers.get('content-length', 0))
-        
-        with open(save_path, 'wb') as file, tqdm(
-            desc="Downloading",
-            total=total_size,
-            unit='iB',
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            for data in response.iter_content(chunk_size=1024):
-                size = file.write(data)
-                pbar.update(size)
-    except Exception as e:
-        print(f"Error downloading model: {e}")
-        # Remove partial download if it exists
-        if os.path.exists(save_path):
-            os.remove(save_path)
-        raise
+os.makedirs(checkpoint_dir, exist_ok=True)
 
-# Get base URL without query parameters
-MODEL_BASE_URL = MODEL_URL
-model_filename = "seamlessM4T_v2_large.pt"  # Default filename
-model_path = os.path.join(f"{default_dir}/infer/model", model_filename)
+required_files = ["model.pth", "config.json", "vocab.json", "speakers_xtts.pth"]
+files_in_dir = os.listdir(checkpoint_dir)
+if not all(file in files_in_dir for file in required_files):
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="model",
+        local_dir=checkpoint_dir,
+    )
+    hf_hub_download(
+        repo_id="coqui/XTTS-v2",
+        filename="speakers_xtts.pth",
+        local_dir=checkpoint_dir,
+    )
 
-# Download model if needed
-download_model(MODEL_BASE_URL, model_path)
-
-eraX_ckpt_path = model_path  # Use the downloaded model path
-
-# Path to the voice you want to clone
-ref_audio_path = f"{default_dir}/infer/audio.wav" # <-- CHANGE THIS!
-
-# Path to the vocab file from this repo
-vocab_file = f"{default_dir}/infer/model/vocab.txt" # <-- CHANGE THIS!
-
-# Where to save the generated sound
-output_dir = f"{default_dir}/audio"
-
-# --- Texts ---
-# Text matching the reference audio (helps the model learn the voice). Please make sure it match with the referrence audio!
-ref_text = "Và nếu họ có quan điểm chính trị trái ngược , bạn vẫn có thể mỉm cười với họ trong nhà thờ nhưng ngoài đời thì khó lòng mà làm được . Những suy nghĩ này có quen thuộc với bạn không ?"
-
-# --- Let's Go! ---
-print("Initializing the TTS engine... (Might take a sec)")
-tts = F5TTSWrapper(
-    vocoder_name="vocos", # Using Vocos vocoder
-    ckpt_path=eraX_ckpt_path,
-    vocab_file=vocab_file,
-    use_ema=False, # ALWAYS False as we converted from .pt to safetensors and EMA (where there is or not) was in there
+xtts_config = os.path.join(checkpoint_dir, "config.json")
+config = XttsConfig()
+config.load_json(xtts_config)
+MODEL = Xtts.init_from_config(config)
+MODEL.load_checkpoint(
+    config, checkpoint_dir=checkpoint_dir, use_deepspeed=use_deepspeed
 )
+if torch.cuda.is_available():
+    MODEL.cuda()
 
-# Normalize the reference text (makes it easier for the model)
-ref_text_norm = TTSnorm(ref_text)
+supported_languages = config.languages
+if not "vi" in supported_languages:
+    supported_languages.append("vi")
 
-# Prepare the output folder
-os.makedirs(output_dir, exist_ok=True)
 
-print("Processing the reference voice...")
-# Feed the model the reference voice ONCE
-# Provide ref_text for better quality, or set ref_text="" to use Whisper for auto-transcription (if installed)
-tts.preprocess_reference(
-    ref_audio_path=ref_audio_path,
-    ref_text=ref_text_norm,
-    clip_short=True # Keeps reference audio to a manageable length (~12s)
-)
-print(f"Reference audio duration used: {tts.get_current_audio_length():.2f} seconds")
+def normalize_vietnamese_text(text):
+    text = (
+        TTSnorm(text, unknown=False, lower=False, rule=True)
+        .replace("..", ".")
+        .replace("!.", "!")
+        .replace("?.", "?")
+        .replace(" .", ".")
+        .replace(" ,", ",")
+        .replace('"', "")
+        .replace("'", "")
+        .replace("AI", "Ây Ai")
+        .replace("A.I", "Ây Ai")
+    )
+    return text
 
-# --- Generate New Speech ---
-print("Generating new speech with the cloned voice...")
 
-def speak(text,filename):
-    # Normalize the text we want to speak
-    text_norm = TTSnorm(text)
+def calculate_keep_len(text, lang):
+    """Simple hack for short sentences"""
+    if lang in ["ja", "zh-cn"]:
+        return -1
 
-    # You can generate multiple sentences easily
-    # Just add more normalized strings to this list
-    sentences = [text_norm]
+    word_count = len(text.split())
+    num_punct = text.count(".") + text.count("!") + text.count("?") + text.count(",")
 
-    for i, sentence in enumerate(sentences):
-        output_path = os.path.join(output_dir, f"{filename}_{i+1}.wav")
+    if word_count < 5:
+        return 15000 * word_count + 2000 * num_punct
+    elif word_count < 10:
+        return 13000 * word_count + 2000 * num_punct
+    return -1
 
-        # THE ACTUAL GENERATION HAPPENS HERE!
-        tts.generate(
-            text=sentence,
-            output_path=output_path,
-            nfe_step=20,               # Denoising steps. More = slower but potentially better? (Default: 32)
-            cfg_strength=2.0,          # How strongly to stick to the reference voice style? (Default: 2.0)
-            speed=1.0,                 # Make it talk faster or slower (Default: 1.0)
-            cross_fade_duration=0.15,  # Smooths transitions if text is split into chunks (Default: 0.15)
+
+@spaces.GPU
+def predict(
+    prompt,
+    language,
+    audio_file_pth,
+    normalize_text=True,
+):
+    if language not in supported_languages:
+        metrics_text = gr.Warning(
+            f"Language you put {language} in is not in is not in our Supported Languages, please choose from dropdown"
         )
 
-        print(f"Boom! Audio saved to: {output_path}")
+        return (None, metrics_text)
 
-    print("\nAll done! Check your output folder.")
+    speaker_wav = audio_file_pth
 
-dir = f'{default_dir}/books'
+    if len(prompt) < 2:
+        metrics_text = gr.Warning("Please give a longer prompt text")
+        return (None, metrics_text)
 
-for filename in os.listdir(dir):
-    fs = open(dir + '/'+filename, "r")
-    text = fs.read()
-    speak(text,filename.split('.')[0])
-    fs.close()
-    print('Saved: '+filename)
+    # if len(prompt) > 250:
+    #     metrics_text = gr.Warning(
+    #         str(len(prompt))
+    #         + " characters.\n"
+    #         + "Your prompt is too long, please keep it under 250 characters\n"
+    #         + "Văn bản quá dài, vui lòng giữ dưới 250 ký tự."
+    #     )
+    #     return (None, metrics_text)
+
+    try:
+        metrics_text = ""
+        t_latent = time.time()
+
+        try:
+            (
+                gpt_cond_latent,
+                speaker_embedding,
+            ) = MODEL.get_conditioning_latents(
+                audio_path=speaker_wav,
+                gpt_cond_len=30,
+                gpt_cond_chunk_len=4,
+                max_ref_length=60,
+            )
+
+        except Exception as e:
+            print("Speaker encoding error", str(e))
+            metrics_text = gr.Warning(
+                "It appears something wrong with reference, did you unmute your microphone?"
+            )
+            return (None, metrics_text)
+
+        prompt = re.sub("([^\x00-\x7F]|\w)(\.|\。|\?)", r"\1 \2\2", prompt)
+
+        if normalize_text and language == "vi":
+            prompt = normalize_vietnamese_text(prompt)
+
+        print("I: Generating new audio...")
+        t0 = time.time()
+        out = MODEL.inference(
+            prompt,
+            language,
+            gpt_cond_latent,
+            speaker_embedding,
+            repetition_penalty=5.0,
+            temperature=0.75,
+            enable_text_splitting=True,
+        )
+        inference_time = time.time() - t0
+        print(f"I: Time to generate audio: {round(inference_time*1000)} milliseconds")
+        metrics_text += (
+            f"Time to generate audio: {round(inference_time*1000)} milliseconds\n"
+        )
+        real_time_factor = (time.time() - t0) / out["wav"].shape[-1] * 24000
+        print(f"Real-time factor (RTF): {real_time_factor}")
+        metrics_text += f"Real-time factor (RTF): {real_time_factor:.2f}\n"
+
+        # Temporary hack for short sentences
+        keep_len = calculate_keep_len(prompt, language)
+        out["wav"] = out["wav"][:keep_len]
+
+        torchaudio.save("output.wav", torch.tensor(out["wav"]).unsqueeze(0), 24000)
+
+    except RuntimeError as e:
+        if "device-side assert" in str(e):
+            # cannot do anything on cuda device side error, need to restart
+            print(
+                f"Exit due to: Unrecoverable exception caused by language:{language} prompt:{prompt}",
+                flush=True,
+            )
+            gr.Warning("Unhandled Exception encounter, please retry in a minute")
+            print("Cuda device-assert Runtime encountered need restart")
+
+            error_time = datetime.datetime.now().strftime("%d-%m-%Y-%H:%M:%S")
+            error_data = [
+                error_time,
+                prompt,
+                language,
+                audio_file_pth,
+            ]
+            error_data = [str(e) if type(e) != str else e for e in error_data]
+            print(error_data)
+            print(speaker_wav)
+            write_io = StringIO()
+            csv.writer(write_io).writerows([error_data])
+            csv_upload = write_io.getvalue().encode()
+
+            filename = error_time + "_" + str(uuid.uuid4()) + ".csv"
+            print("Writing error csv")
+            error_api = HfApi()
+            error_api.upload_file(
+                path_or_fileobj=csv_upload,
+                path_in_repo=filename,
+                repo_id="coqui/xtts-flagged-dataset",
+                repo_type="dataset",
+            )
+
+            # speaker_wav
+            print("Writing error reference audio")
+            speaker_filename = error_time + "_reference_" + str(uuid.uuid4()) + ".wav"
+            error_api = HfApi()
+            error_api.upload_file(
+                path_or_fileobj=speaker_wav,
+                path_in_repo=speaker_filename,
+                repo_id="coqui/xtts-flagged-dataset",
+                repo_type="dataset",
+            )
+
+            # HF Space specific.. This error is unrecoverable need to restart space
+            space = api.get_space_runtime(repo_id=repo_id)
+            if space.stage != "BUILDING":
+                api.restart_space(repo_id=repo_id)
+            else:
+                print("TRIED TO RESTART but space is building")
+
+        else:
+            if "Failed to decode" in str(e):
+                print("Speaker encoding error", str(e))
+                metrics_text = gr.Warning(
+                    metrics_text="It appears something wrong with reference, did you unmute your microphone?"
+                )
+            else:
+                print("RuntimeError: non device-side assert error:", str(e))
+                metrics_text = gr.Warning(
+                    "Something unexpected happened please retry again."
+                )
+            return (None, metrics_text)
+    return ("output.wav", metrics_text)
+
+
+with gr.Blocks(analytics_enabled=False) as demo:
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown(
+                """
+                # viXTTS Demo ✨
+                - Github: https://github.com/thinhlpg/vixtts-demo/
+                """
+            )
+        with gr.Column():
+            # placeholder to align the image
+            pass
+
+    with gr.Row():
+        with gr.Column():
+            input_text_gr = gr.Textbox(
+                label="Text Prompt (Văn bản cần đọc)",
+                info="Mỗi câu nên từ 10 từ trở lên.",
+                value="Xin chào, tôi là một mô hình chuyển đổi văn bản thành giọng nói tiếng Việt.",
+            )
+            language_gr = gr.Dropdown(
+                label="Language (Ngôn ngữ)",
+                choices=[
+                    "vi",
+                    "en",
+                    "es",
+                    "fr",
+                    "de",
+                    "it",
+                    "pt",
+                    "pl",
+                    "tr",
+                    "ru",
+                    "nl",
+                    "cs",
+                    "ar",
+                    "zh-cn",
+                    "ja",
+                    "ko",
+                    "hu",
+                    "hi",
+                ],
+                max_choices=1,
+                value="vi",
+            )
+            normalize_text = gr.Checkbox(
+                label="Chuẩn hóa văn bản tiếng Việt",
+                info="Normalize Vietnamese text",
+                value=True,
+            )
+            ref_gr = gr.Audio(
+                label="Reference Audio (Giọng mẫu)",
+                type="filepath",
+                value="model/samples/nu-luu-loat.wav",
+            )
+            tts_button = gr.Button(
+                "Đọc 🗣️🔥",
+                elem_id="send-btn",
+                visible=True,
+                variant="primary",
+            )
+
+        with gr.Column():
+            audio_gr = gr.Audio(label="Synthesised Audio", autoplay=True)
+            out_text_gr = gr.Text(label="Metrics")
+
+    tts_button.click(
+        predict,
+        [
+            input_text_gr,
+            language_gr,
+            ref_gr,
+            normalize_text,
+        ],
+        outputs=[audio_gr, out_text_gr],
+        api_name="predict",
+    )
+
+demo.queue()
+demo.launch(debug=True, show_api=True, share=True)
