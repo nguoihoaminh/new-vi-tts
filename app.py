@@ -24,24 +24,37 @@ def download_model(url: str, save_path: str):
     print(f"Downloading model to {save_path}...")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
-    response = requests.get(url, stream=True)
-    total_size = int(response.headers.get('content-length', 0))
-    
-    with open(save_path, 'wb') as file, tqdm(
-        desc="Downloading",
-        total=total_size,
-        unit='iB',
-        unit_scale=True,
-        unit_divisor=1024,
-    ) as pbar:
-        for data in response.iter_content(chunk_size=1024):
-            size = file.write(data)
-            pbar.update(size)
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # Raise error for bad status codes
+        total_size = int(response.headers.get('content-length', 0))
+        
+        with open(save_path, 'wb') as file, tqdm(
+            desc="Downloading",
+            total=total_size,
+            unit='iB',
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as pbar:
+            for data in response.iter_content(chunk_size=1024):
+                size = file.write(data)
+                pbar.update(size)
+    except Exception as e:
+        print(f"Error downloading model: {e}")
+        # Remove partial download if it exists
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        raise
+
+# Get base URL without query parameters
+MODEL_BASE_URL = MODEL_URL
+model_filename = "seamlessM4T_v2_large.pt"  # Default filename
+model_path = os.path.join(f"{default_dir}/infer/model", model_filename)
 
 # Download model if needed
-download_model(MODEL_URL, f"{default_dir}/infer/model/")
+download_model(MODEL_BASE_URL, model_path)
 
-eraX_ckpt_path = f"{default_dir}/infer/model/seamlessM4T_v2_large.pt"
+eraX_ckpt_path = model_path  # Use the downloaded model path
 
 # Path to the voice you want to clone
 ref_audio_path = f"{default_dir}/infer/audio.wav" # <-- CHANGE THIS!
