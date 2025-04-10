@@ -26,7 +26,7 @@ output_dir = f"{default_dir}/audio"
 
 # --- Texts ---
 # Text matching the reference audio (helps the model learn the voice). Please make sure it match with the referrence audio!
-ref_text = "Họ có quan điểm trái ngược, bạn có thể mỉm cười với họ trong nhà thờ, nhưng ngoài đời thì khó lòng mà làm được. Những suy nghĩ này có quen thuộc với bạn không?"
+ref_text = "Và nếu họ có quan điểm chính trị trái ngược, bạn có thể mỉm cười với họ trong nhà thờ nhưng ngoài đời thì khó lòng mà làm được. Những suy nghĩ này có quen thuộc với bạn không? Chúng ta dễ dàng đặt ra giới hạn cho tình yêu thương của mình, vạch ra ranh giới giữa những người xứng đáng và không xứng đáng. Điều đó có phải là tình yêu mà Cứu Chúa Giê Xu đã bày tỏ? Sứ đồ Giăng thuật lại rằng Đức Chúa Giê Xu chủ ý đi qua xứ Sa Ma Ri, Giăng chương bốn câu ba đến bốn mươi hai"
 
 # --- Let's Go! ---
 print("Initializing the TTS engine... (Might take a sec)")
